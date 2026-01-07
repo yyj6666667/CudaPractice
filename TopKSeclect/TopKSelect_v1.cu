@@ -89,5 +89,5 @@ extern "C" void solve(const float* input, float* output, int N, int k) {
     float* input_mut = const_cast<float*>(input);
     int shared_mem_size = k * sizeof(uint);
     pick<<<1, n_threads, shared_mem_size>>>(input_mut, output, N, k);
-    cudaDeviceSynchronize(); // 确保cpu提交的kernel执行完成
+    cudaDeviceSynchronize(); // 确保之前cpu提交的kernel执行完成
 }
