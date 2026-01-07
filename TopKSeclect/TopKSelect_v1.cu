@@ -30,6 +30,8 @@ __global__ void pick(float* in, float* out, int N, int k) {
     __syncthreads();
 
     for (int j = threadIdx.x; j < N; j += blockDim.x) {
+                                                     //非常常用： Grid-Stride Loop
+                                                     //尤其在blockDim无法一次性涵盖所有元素的时候
         float cur = in[j];
         uint order = floatToOrder(cur);
         if (order > shared_topk[k - 1]) {

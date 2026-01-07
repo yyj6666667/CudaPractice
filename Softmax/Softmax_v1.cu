@@ -41,20 +41,36 @@ __global__ void split_sum_kernel(const float* input, float* exp_input, float* ou
     #endif
 }
 
-__global__ void softmax_kernel(float *exp_input, float *output, int N, float* sum_split,
-                                int origin_threads_per_blk) {
-    #ifndef DEBUG
-    if (threadIdx.x == 0) {
-        sum = 0;
-        for (int i = 0; i < (int)ceilf((float)N / origin_threads_per_blk); i++) {
-            sum += sum_split[i];
-        }
+__global__ void softmax_kernel(float *exp_input, float *output, int N, float* sum_split, int len_sum_split) {
+    extern __shared__ sum_list_for_reduction = [];
+    float sum_single_thread = 0.0f; 
+                                 // 这是用来之后统一给sum_list_for_reduction 赋值的， 这样可以初始化0的麻烦
+                                 // 有多个sum_single_thread, 因为这是cuda， 避免了初始化0的麻烦, 再重复一遍
+    for (int i = threadIdx.x; i < len_sum_split; i += blockDim.x)  {
+                                                                    //Grid-Stride loop
+        sum_single_thread += sum_split[i];
     }
-    #endif
-    if (threadIdx.x == 0) {
-        for (int i = 0; i < N; i++) {
-            output[i] = exp_input[i] / sum;
+    sum_list_for_reduction[threadIdx.x] = sum_single_thread;
+
+    __syncthreads();
+
+    // 神奇的归约， from O(n) to O(log(n))
+    // a fixed pattern ， 太妙了
+    // 然而这是一个简陋版的归约， 只能处理blockDim.x 是 2 的幂的情况
+                                        //没错， 可能偶数都不行
+    for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+        if (threadIdx.x < stride) {
+            sum_list_for_reduction[threadIdx.x] += 
+            sum_list_for_reduction[threadIdx.x + stride];
         }
+        __syncthreads();
+    }
+
+    float total = sum_list_for_reduction[0];
+
+    //Grid-Stride 计算输出
+    for (int i = threadIdx.x; i < N; i += blockDim.x) {
+        output[i] = exp_input[i] / total;
     }
 }
 
@@ -69,7 +85,7 @@ extern "C" void solve(const float* input, float* output, int N) {
     cudaMemset(sum_split, 0,  blocksPerGrid * sizeof(float));
     split_sum_kernel<<<blocksPerGrid, threadsPerBlock, threadsPerBlock * sizeof(float)>>>
     (input, exp_input, output, N, sum_split);
-    softmax_kernel<<<1, 1>>>(exp_input, output, N, sum_split, threadsPerBlock);
+    softmax_kernel<<<1, threadsPerBlock, threadsPerBlock * sizeof (float)>>>(exp_input, output, N, sum_split, blocksPerGrid);
     cudaFree(sum_split);
     cudaFree(exp_input);
 
