@@ -39,7 +39,8 @@ __global__ void pick(float* in, float* out, int N, int i) {
         unsigned long long pack = ((unsigned long long)order_cur << 32)
                                   | j ;
         //cuda's atomic ops
-        // compare packedmax and pack, choose the bigger one write into packedmax by ptr                         
+        // compare packedmax and pack, choose the bigger one write into packedmax by ptr  
+        // atomic 返回值是执行ops之前， 该ptr位置指向的旧值                       
         atomicMax(&packedmax, pack);
 
     }
