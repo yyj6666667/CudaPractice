@@ -1,7 +1,7 @@
 /**
  * @file   SoftmaxAttention_improved.cu
  * @author Yujie-Yang 
- * @brief  leetcode 排名前6%
+ * @brief  leetgpu 排名前6%
  * @date   2026-01-14
  */
 

@@ -10,7 +10,6 @@
  * 
  */
 #include <cuda_runtime.h>
-//这是一个最优子问题
 
 __global__ void prefix_kernel(float* in,  float* out, int n) {
     extern __shared__ double s_sum[];
