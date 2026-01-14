@@ -1,7 +1,7 @@
 /**
  * @file SoftmaxAttention_naive.cu
  * @author Yujie-Yang (yyj6666667@gmail.com)
- * @brief  adapted for large N, but still naive, 由于N的限制， 暂时没有用shared_memory
+ * @brief  adapted for large N, but still naive, 由于N的限制， 暂时没有用shared_memory, 性能排名倒数10%
  * @version 0.1
  * @date 2026-01-14
  * 
