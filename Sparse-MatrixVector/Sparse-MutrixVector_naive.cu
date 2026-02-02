@@ -45,4 +45,4 @@ extern "C" void solve(const float* A, const float* x, float* y, int M, int N, in
     single_kernel<<<M, n_threads, size_shared_mem>>>(A, x, y, M, N);
 }
 
-//debug: 你把blockIdx 写成 gridIdx, hh， 不存在啊
+
