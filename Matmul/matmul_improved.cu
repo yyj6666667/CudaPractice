@@ -1,65 +1,89 @@
 /**
- * @brief out of bound writing remains to be debug
- * 
+ * @brief matmul_8elem_per_thread, ranging top 12% of leetgpu
+ * @author yyj
  */
-#define BM  64
-#define BN  64
-#define BK  8
-#define TM  8
+#define BM  64 // tiled size for row
+#define BN  64 // tiled size for col
+#define BK  16 //K-loop 前进步长， 也可设置为8
+#define TM  4  //element num per thread
+               //"TM" indicates specific to one thread on the axis row (which has length"M")
 
-__global__ void kernel(const float* A, const float* B, float* C, int M, int N, int K) {
+__global__ void kernel(const float* A, const float* B, float* C, unsigned int M, unsigned int N, unsigned int K) {
     __shared__ float sA[BM][BK];
     __shared__ float sB[BK][BN];
 
-    int bx = blockIdx.x;
-    int by = blockIdx.y;
-    int tx = threadIdx.x;
+    unsigned int bx = blockIdx.x, by = blockIdx.y;
+    unsigned int tx = threadIdx.x;
 
-    int t_row = tx / BN;
-    int t_col = tx % BN;
+    //declared for copy
+    int n_threads = (BM * BN) / TM;
+    int elements_sA  = BM * BK;
+    int elements_sB  = BK * BN;
 
-    float reg_C[TM] = {0.0f};
+    //declared for compute
+    int tRow = tx / BN * TM;
+    int tCol = tx % BN;
+    float reg_C[TM] = {0.f};
+    
+    //classic K-loop
+    for(int k = 0; k < N; k += BK) {
+        //copy 1:
+        for (int stride = 0; stride < elements_sA; stride += n_threads) {
+            int idx = tx + stride;
+            if (idx < elements_sA) {
+                int row_sA = idx / BK;
+                int col_sA = idx % BK;
+                int g_row = by * BM + row_sA;
+                int g_col = k + col_sA;
 
-    int rowA = tx / BK;
-    int colA = tx % BK;
-    int rowB = tx / BN;
-    int colB = tx % BN;
-    for (int k = 0; k < K; k += BK) {
-        if (by * BM + rowA < M && k + colA < K) {
-            sA[rowA][colA] = A[(by * BM + rowA) * K + k + colA];
-        } else{
-            sA[rowA][colA] = 0.0f;
+                sA[row_sA][col_sA] = (g_row < M && g_col < N) ? A[g_row * N + g_col] : 0.f;
+            }
         }
-        if (bx * BN + colB < N && k + rowB < K) {
-            sB[rowB][colB]  = B[(k + rowB) * N + bx * BN + colB];
-        } else {
-            sB[rowB][colB] = 0.0f;
+                                                                        //在外面套一层stride循环， 
+                                                                        //是因为n_threads不能保证一次就把一个tile的sA成功写入
+        //copy 2:
+        for (int stride = 0; stride < elements_sB; stride += n_threads) {
+            int idx = tx + stride;
+            if (idx < elements_sB) {
+                int row = idx / BN;
+                int col = idx % BN;
+                int g_row = k + row;
+                int g_col = bx * BN + col;
+
+                sB[row][col] = (g_row < N && g_col < K) ? B[g_row * K + g_col] : 0.f;
+            }
         }
+
         __syncthreads();
 
-        #pragma unroll
-        for (int fix = 0; fix < BK; fix ++) {
-            float reg_tem = sB[fix][t_col];
-            for (int i = 0; i < TM; i++) {
-                reg_C[i] += sA[t_row * TM + i][fix] * reg_tem;
+        //compute:
+        //(BM, BK) & (BK, BN)
+        //using single register to accelarate
+        //视图： 把线程按逻辑平铺到res矩阵里面
+        //注意！ tRow = (tid / BN) * TM, 因为一个线程负责了TM个结果（列方向）
+        for (int i = 0; i < BK; i++) {
+            float reg_B = sB[i][tCol];
+            for (int aj = 0; aj < TM; aj++) {
+                float reg_A = sA[tRow + aj][i];
+                reg_C[aj] += reg_A * reg_B;
             }
         }
         __syncthreads();
-
+                        // 开始忘写了， 旧计算使用的shared mem可能被新数据覆盖！
     }
-
+    
+    //write back
     for (int i = 0; i < TM; i++) {
-        int cur_row = by * BM + t_row * TM + i;
-        int cur_col = bx * BN + t_col;
-        if (cur_row < M && cur_col < N) {
-            C[cur_row * N + cur_col] = reg_C[i];
+        int g_row = by * BM + tRow + i;
+        int g_col      = bx * BN + tCol;
+        if (g_row < M && g_col < K) {
+            C[g_row * K + g_col] = reg_C[i];
         }
     }
-
 }
 
 extern "C" void solve(const float* A, const float* B, float* C, int M, int N, int K) {
-    dim3 blockDim((BM * BN) / TM);
-    dim3 gridDim((N + BN - 1)/BN, (M + BM - 1)/BM);
+    dim3 blockDim((BM / TM) * BN);
+    dim3 gridDim((K + BN - 1)/BN, (M + BM - 1)/BM);
     kernel<<<gridDim, blockDim>>>(A, B, C, M, N, K);
 }
